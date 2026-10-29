@@ -1,0 +1,55 @@
+# Build directories (root project and all standalone courses)
+build/
+cmake-build-*/
+bin/
+obj/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+CMakeUserPresets.json
+
+# Generated measurements, captures and validation output
+out/
+/thread-pool-course/validation/
+
+# Visual Studio / local IDE state
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Compiled binaries and intermediate files
+*.exe
+*.dll
+*.lib
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.pch
+*.ipch
+*.exp
+*.tlog
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Temporary files and machine-local configuration
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+.env
+.env.*
+!.env.example

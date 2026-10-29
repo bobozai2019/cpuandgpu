@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CPU 并发实验室 · 教学说明</title>
+<style>
+:root{color-scheme:dark;font:17px/1.8 system-ui,"Microsoft YaHei",sans-serif;background:#0c131f;color:#e6eef9}body{max-width:1080px;margin:60px auto;padding:0 28px}h1{font-size:42px;line-height:1.3;margin:12px 0 24px}h2{font-size:26px;margin-top:48px}h3{margin:0 0 12px;color:#4bdabf}p{color:#b8c9dd}a{color:#7db7ff}code{background:#23334a;padding:3px 7px;border-radius:4px}pre{white-space:pre-wrap;background:#162131;border:1px solid #30435d;padding:22px;border-radius:12px}table{width:100%;border-collapse:collapse}td,th{text-align:left;border-bottom:1px solid #30435d;padding:14px 12px}.tag{font-size:13px;letter-spacing:3px;color:#4bdabf}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:#162131;padding:24px;border-radius:12px}.bar{height:20px;background:#4bdabf;border-radius:4px;max-width:100%}.muted{font-size:14px;color:#91a8c2}label{display:block;margin:16px 0}input{width:210px;accent-color:#4bdabf}summary{cursor:pointer;color:#4bdabf}details{background:#162131;padding:16px 22px;margin:12px 0;border-radius:10px}@media(max-width:750px){.cards{grid-template-columns:1fr}h1{font-size:30px}}@media print{body{color:#111;background:white;margin:0}p{color:#222}.card,pre,details{background:#eee}a,h3{color:#056}}
+</style>
+<div class="tag">CPU PARALLEL LAB / C++17 / WINDOWS</div>
+<h1>把“开了很多线程”<br>变成能验证的多核协作</h1>
+<p>本工程让 CPU 计算一张带有反射和漫反射的图像。每个图块都是实际任务，每条时间线都来自真实计时。先单线程完成相同画面，再改变调度方式，观察完成时间和 CPU 执行时间。</p>
+<p><a href="README.md">完整工程说明与测量口径</a> · <a href="VERIFICATION.md">本机验证记录</a> · <a href="src/engine.cpp">调度器源码</a> · <a href="src/raytrace.cpp">计算源码</a></p>
+<div class="cards"><div class="card"><h3>01 / 看任务</h3>图块按 worker 着色；时间线显示每个任务何时开始、结束。重叠表明任务并发推进。</div><div class="card"><h3>02 / 看执行</h3>操作系统记录每条工作线程实际消耗的 CPU 时间。除以墙钟时间，估算平均逻辑 CPU 并行度。</div><div class="card"><h3>03 / 看收益</h3>串行时间除以并行时间，才是加速比。所有配置的最终像素必须完全一致。</div></div>
+<h2>先跑这一组</h2>
+<ol><li>双击 <strong>Start-Lab.cmd</strong>。保持“动态取任务”，选择 4 或 8 个工作线程。</li><li>点“一键对照”：先串行，再并行。提高采样数到 128 或 256，便于观察成图过程。</li><li>切换“静态分块”，重跑。天空通常更容易算，地面和反射区域更难算；观察最后仍在工作的线程。</li><li>固定其他参数，把图块边长从 4 改为 32、128、256，观察调度开销和尾部等待。</li><li>用 <strong>Run-Benchmark.cmd</strong> 收集多轮数据。窗口刷新也有成本，正式测量以 CLI 为准。</li></ol>
+<h2>同一份工作，三种组织方法</h2>
+<table><tr><th>策略</th><th>分配方式</th><th>可能出现的现象</th></tr><tr><td>单线程</td><td>W0 依次执行全部图块</td><td>作为同一算法的参考结果和耗时基准</td></tr><tr><td>静态分块</td><td>每线程预先分到连续区间</td><td>任务数量相近，但求交与反射工作量不同；部分线程提前结束</td></tr><tr><td>动态取任务</td><td>算完一块，用原子索引再领一块</td><td>减少工作量不均的尾部等待；块太小则增加领取与计时开销</td></tr></table>
+<h2>并行上限：自己改参数看看</h2>
+<p>下面是 Amdahl 理论计算器，不是实时硬件测量。假设总工作量固定，可并行部分理想均分，并且没有额外调度或内存成本。</p>
+<div class="card"><label>串行比例 <input id="serial" type="range" min="0" max="80" value="10"> <span id="sval"></span></label><label>工作线程 <input id="workers" type="range" min="1" max="32" value="8"> <span id="wval"></span></label><p id="formula"></p><div class="bar" id="bar"></div><p class="muted">长度表示理论加速比相对于线程数量的比例。真实机器还受缓存、带宽、调度、频率和 SMT 等因素影响。</p></div>
+<h2>读代码的顺序</h2>
+<details open><summary>第一步：RenderTile — 哪些数据能并行写？</summary><p>每个图块只覆盖自己的矩形像素。像素的随机数种子由像素坐标决定，所有采样在同一线程内按固定顺序求和。更换线程或图块划分不会改变结果。</p><pre>pixel → 固定种子 → 多条光线 → 求交和反射 → 颜色平均 → 独占像素</pre></details>
+<details><summary>第二步：Worker — 多线程在哪里开始分工？</summary><p>所有 worker 等待带谓词的条件变量。Start 发布新一代批次，线程醒来。静态方式直接计算自己的区间；动态方式对共享 next 做 fetch_add(1)，取得唯一图块编号。下一次取任务发生在当前图块计算完成后。</p><pre>while (!cancel) {
+    index = next.fetch_add(1);
+    if (index >= tileCount) break;
+    Process(index, workerId);
+}</pre><p>这里的原子操作用于唯一分配，不承担像素结果的发布；两个同步责任分别处理。</p></details>
+<details><summary>第三步：Process / Image — 如何让显示线程安全读取？</summary><p>worker 完成图块后，用 release 发布 state=2。显示线程读到 acquire 的完成状态，才复制该块像素。未完成的块始终不读取，避免一边写像素一边显示造成数据竞争。取消中的块不会当成完整结果。</p></details>
+<details><summary>第四步：最后一个 worker — 何时能算最终耗时？</summary><p>每线程在执行批次前后读取 CPU 时间；结束时在锁下提交统计，并减少剩余 worker 数。最后一个 worker 记录墙钟结束时刻、标记批次完成并唤醒等待者。完整像素比较和导出发生在计时结束之后。</p></details>
+<h2>容易误读的四个数字</h2>
+<table><tr><th>指标</th><th>含义与边界</th></tr><tr><td>线程数量</td><td>只是可以参与计算的工作线程数；不等于实际同时执行数。</td></tr><tr><td>时间线重叠</td><td>任务墙钟区间相交，期间可能发生抢占或等待；不能据此证明使用了几个物理核心。</td></tr><tr><td>CPU 时间 / 墙钟</td><td>平均消耗的逻辑 CPU 执行时间。短任务有记账误差，可能略高于线程数；不强行截断原始值。</td></tr><tr><td>加速比</td><td>相同输入的串行时间 / 当前时间。4 核 8 线程的硬件不能预设为 8 倍加速。</td></tr></table>
+<h2>把结果留下来</h2><pre>.\build\Release\cpu_benchmark.exe --width 640 --height 360 --samples 256 --workers 8 --repeats 3 --output out\benchmark-long</pre>
+<p>输出每轮 CSV、汇总 CSV、每线程 JSON、BMP 图像和 trace。各配置预热后运行，每轮反转顺序；像素比较失败时程序返回非零退出码。比较 tile 大小时，其他参数保持相同。</p>
+<p class="muted">实现为独立 C++17 工程，Windows SDK / MSVC，无第三方下载依赖。计时定义依据 <a href="https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadtimes">GetThreadTimes</a> 和 <a href="https://learn.microsoft.com/en-us/windows/win32/sysinfo/acquiring-high-resolution-time-stamps">QPC</a>。详细限制、验证结果和源码入口以 README 为准。</p>
+<script>
+const serial=document.getElementById('serial'),workers=document.getElementById('workers');
+function update(){const f=+serial.value/100,n=+workers.value,s=1/(f+(1-f)/n);document.getElementById('sval').textContent=(f*100).toFixed(0)+'%';document.getElementById('wval').textContent=n;document.getElementById('formula').textContent=`S = 1 / (${f.toFixed(2)} + ${(1-f).toFixed(2)} / ${n}) = ${s.toFixed(2)} 倍`;document.getElementById('bar').style.width=(s/n*100)+'%';}
+serial.addEventListener('input',update);workers.addEventListener('input',update);update();
+</script></html>
